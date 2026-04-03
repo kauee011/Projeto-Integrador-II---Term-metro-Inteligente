@@ -1,0 +1,69 @@
+#include <DHT.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
+
+#define DHTPIN 8
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE);
+
+#define SERVICE_UUID        "12345678-1234-1234-1234-1234567890ab"
+#define CHARACTERISTIC_UUID "abcd1234-ab12-cd34-ef56-abcdef123456"
+
+BLECharacteristic* pCharacteristic;
+
+bool deviceConnected = false;
+
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
+    deviceConnected = true;
+  }
+  void onDisconnect(BLEServer* pServer) {
+    deviceConnected = false;
+  }
+};
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+  Serial.println("Iniciando BLE e DHT22...");
+
+  BLEDevice::init("ESP32C3_DHT22");
+  BLEServer* pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService* pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+                      CHARACTERISTIC_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_NOTIFY
+                    );
+
+  pCharacteristic->addDescriptor(new BLE2902());
+  pService->start();
+
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->start();
+  Serial.println("BLE pronto. Aguardando conexão...");
+}
+
+void loop() {
+  float temperatura = dht.readTemperature();
+  float umidade = dht.readHumidity();
+
+  if (isnan(temperatura) || isnan(umidade)) {
+    Serial.println("Erro ao ler do sensor DHT.");
+  } else {
+    String msg = "Temp: " + String(temperatura, 1) + "°C | Umid: " + String(umidade, 1) + "%";
+    Serial.println(msg);
+
+    if (deviceConnected) {
+      pCharacteristic->setValue(msg.c_str());
+      pCharacteristic->notify();
+    }
+  }
+
+  delay(3000);
+}
